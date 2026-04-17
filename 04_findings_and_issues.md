@@ -8,10 +8,46 @@
 
 | 问题 | 影响 | Issue | 状态 | 当前方案 |
 |------|------|-------|------|---------|
-| V3.2 NVFP4 + FlashMLA-Sparse | 启动失败或精度异常 | [MO #763](https://github.com/NVIDIA/Model-Optimizer/issues/763) | 未修复 | V3.2 一律用 FP8 |
+| V3.2 NVFP4 + FlashMLA-Sparse | `sparse_prefill_fwd` 崩溃（要求 KV=BF16，NVFP4 不可配） | [MO #763](https://github.com/NVIDIA/Model-Optimizer/issues/763) | 未修复（stale auto-close） | 我们用 FlashInfer-MLA-Sparse 后端跑通（#115）；生产仍推荐 FP8 |
 | Qwen3.5 NVFP4 精度严重下降 | GSM8K=0.35 | [vLLM #36094](https://github.com/vllm-project/vllm/issues/36094) | 未修复 | 用 FP8 |
 | Qwen3.5 MTP 高并发 (≥40) 崩溃 | cudaErrorIllegalAddress | — | 未修复 | 命令行模板默认不开 MTP |
 | Qwen3.5 FP8 + DeepGEMM 精度 | 注意力层 E8M0 误差 1.44–1.65× | [vLLM #37618](https://github.com/vllm-project/vllm/issues/37618) | 未修复 | `VLLM_USE_DEEP_GEMM=0` |
+
+### 1.1 V3.2 NVFP4 + FlashMLA-Sparse 详细分析（MO #763）
+
+**报错**：
+
+```
+RuntimeError: Expected kv.dtype() == torch::kBFloat16 to be true, but got false.
+位置：_deps/flashmla-src/csrc/pybind.cpp:404 (sparse_prefill_fwd)
+```
+
+**根因**：
+
+- `flash_mla.sparse_prefill_fwd` kernel 硬约束 KV tensor 必须是 BF16
+- 但 `kv_cache_config.dtype` 只接受 `fp8 / nvfp4 / auto`，`auto` 不会选 BF16
+- 结果：NVFP4 权重 + FlashMLA-Sparse 后端时无法在 API 层配出"BF16 KV"，权重加载成功但 prefill 阶段崩溃
+
+**Issue 进展**：
+
+- 报告人（evgeniiperepelkin，2026-01-12）实测 H200×8 + TRT-LLM 1.2.0rc7 复现
+- 社区方案（`kv_cache_quant_algo: null` + `dtype: fp8`）报告人验证仍失败
+- NVIDIA collaborator 建议升级 TRT-LLM 1.2.0rc8 + 用官方 [`nvidia/DeepSeek-V3.2-NVFP4`](https://huggingface.co/nvidia/DeepSeek-V3.2-NVFP4) checkpoint
+- **2026-03-13 因 14 天无回复被 stale bot 自动关闭，并非真正修复**
+
+**我们的实测验证**（B200×8，vLLM 0.17.1rc1 nightly）：
+
+| 后端 | V3.2 NVFP4 | 测试编号 | 结论 |
+|------|----------|---------|------|
+| FLASHMLA_SPARSE | ❌ 启动失败/崩溃 | #110/#111/#112/#113/#114 | 与 #763 报错一致 |
+| FLASHINFER_MLA_SPARSE | ✅ 全配置通过 | #115/#116/#117/#118/#119 | 事实 workaround，#115 达 1,177 toks/s |
+
+> **关键发现**：#763 中没人尝试 FlashInfer 后端，但我们实测 FlashInfer-MLA-Sparse 完全规避了这个 BF16 KV 硬约束。这是社区未记录的 workaround。
+>
+> **生产建议**：仍推荐 V3.2 FP8（#105/#108），因为：
+> 1. NVFP4 + FlashInfer 仅在 vLLM nightly 验证，未经长期稳定性测试
+> 2. FP8 性能足够（@60 742 toks/s），且无任何后端兼容性风险
+> 3. NVFP4 收益（+50%）不足以承担一个未修复 NVIDIA bug 的尾部风险
 
 ---
 
