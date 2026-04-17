@@ -71,7 +71,7 @@
 
 | 问题 | 影响 | 状态 |
 |------|------|------|
-| V3.2 NVFP4 + FlashMLA-Sparse 不兼容 | 生产必须用 FP8 | 未修复 (MO #763) |
+| V3.2 NVFP4 + FlashMLA-Sparse 不兼容 | NVFP4 须用 FlashInfer 后端；生产推荐 FP8 | 未修复 (MO #763, stale auto-close) |
 | Qwen3.5 NVFP4 精度下降 | 禁止生产使用 | 未修复 (vLLM #36094) |
 | Qwen3.5 MTP 高并发崩溃 | c≥40 时 CUDA 错误 | 未修复 |
 | FP8 + DeepGEMM 精度问题 | 必须 `VLLM_USE_DEEP_GEMM=0` | 未修复 (vLLM #37618) |

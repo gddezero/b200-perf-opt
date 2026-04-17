@@ -71,7 +71,7 @@
 | **低延迟 NVFP4** | TP=8 DP=1 EP=off FlashMLA | #113 | 2.46 | 491 | 400ms |
 | **LMCache 多轮** | TP=1 DP=8 EP=on + LMCache 1600GB | #195 | 2.20（c=48）| 542 | 1177ms |
 
-> V3.2 NVFP4 存在 FlashMLA-Sparse 兼容 bug (MO #763)，生产环境必须用 FP8。
+> V3.2 NVFP4 + FlashMLA-Sparse 不兼容 (MO #763)；FlashInfer-MLA-Sparse 后端可 workaround（#115），但稳定性未经长期验证，生产推荐 FP8。详见 [04 §1.1](04_findings_and_issues.md)。
 
 ### 2.2 DeepSeek V3.1 (B200 × 8)
 

@@ -65,7 +65,7 @@ TP=2, DP=4, EP=8:
 | Q heads | 128 |
 | 推荐 TP | TP=1（128 Q head 不分割效率最高）|
 | 注意力后端 | FlashMLA-Sparse / FlashInfer-MLA-Sparse |
-| 约束 | NVFP4 有 FlashMLA-Sparse 兼容 bug → 必须用 FP8 |
+| 约束 | NVFP4 与 FlashMLA-Sparse 不兼容 (MO #763)；NVFP4 必须搭 FlashInfer-MLA-Sparse 后端，生产推荐 FP8 |
 
 **TP 规则**：
 - TP=1：性能最优，128 Q head 不分割，KV cache 容量最大

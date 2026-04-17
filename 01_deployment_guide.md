@@ -310,7 +310,7 @@ kill $(pgrep -f "vllm serve")
 
 | 模型 | 推荐 | 禁用 | 原因 |
 |------|------|------|------|
-| DeepSeek V3.2 | FP8 | NVFP4 | NVFP4 + FlashMLA-Sparse 兼容 bug (MO #763) |
+| DeepSeek V3.2 | FP8 | NVFP4 + FlashMLA-Sparse | NVFP4 与 FlashMLA-Sparse 后端不兼容 (MO #763)。NVFP4 + FlashInfer-MLA-Sparse 实测可工作（#115），但稳定性未经长期验证，生产推荐 FP8 |
 | DeepSeek V3.1 | NVFP4 > FP8 | — | NVFP4 吞吐 +44%，精度正常 |
 | Qwen3-235B | NVFP4 > FP8 > BF16 | — | NVFP4 官方 checkpoint 可用 |
 | Qwen3.5-397B | FP8 | NVFP4 | NVFP4 精度严重下降 (vLLM #36094) |
@@ -334,7 +334,7 @@ kill $(pgrep -f "vllm serve")
 | 规则 | 原因 |
 |------|------|
 | **禁止 `--enforce-eager`** | 必须通过正确 kernel 配置解决 CUDA graph 问题 |
-| **禁止 V3.2 NVFP4 生产** | FlashMLA-Sparse 兼容 bug 未修复 |
+| **生产推荐 V3.2 FP8** | NVFP4 + FlashMLA-Sparse 不兼容 (MO #763)；NVFP4 + FlashInfer 可跑但未经长期验证 |
 | **禁止 Qwen3.5 NVFP4 生产** | 精度严重下降 (GSM8K=0.35) |
 | **禁止 Qwen3.5 MTP ≥40 并发** | cudaErrorIllegalAddress 崩溃 |
 | **FP8 必须 `VLLM_USE_DEEP_GEMM=0`** | 注意力层精度下降 bug (vLLM #37618) |
