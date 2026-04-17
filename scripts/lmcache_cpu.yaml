@@ -1,0 +1,84 @@
+# LMCache CPU Offload 配置
+# 用途：BF16 场景下将 GPU KV Cache 中被 LRU 驱逐的 block 卸载到 CPU DRAM
+#       而非直接丢弃，使有效 KV Cache 容量从 ~421 GB 扩展到 ~921 GB（+500 GB）
+#
+# 使用方式：
+#   export LMCACHE_CONFIG_FILE=/lssd/lmcache_cpu.yaml
+#   在 vLLM 启动参数中加：
+#     --kv-offloading-backend lmcache
+#     --kv-offloading-size 500
+#     --disable-hybrid-kv-cache-manager
+
+# ── 核心参数 ──────────────────────────────────────────────────────────────────
+
+# KV Cache block 的粒度（token 数）
+# vLLM block_size=16，chunk_size 必须是 block_size 的整数倍
+# 1024 = 64 个 block，权衡传输开销与命中精度
+chunk_size: 1024
+
+# ⚠️ 关键：必须固定 Python hash seed，否则跨进程 hash 不一致 → lookup 永远 0 hits
+# 原因：LMCache 的 Scheduler 进程和 Worker 进程各自独立运行，
+#       Python 的 builtin hash() 每次进程启动使用随机 PYTHONHASHSEED，
+#       导致 Scheduler 计算的 lookup hash ≠ Worker 存储时计算的 hash
+# 修复：在启动环境中设置 export PYTHONHASHSEED=0（见 profile set_env_vars_single）
+#       以及 docker-serve.sh 中将 PYTHONHASHSEED 传入容器
+# pre_caching_hash_algorithm 保持默认 builtin 即可（seed 固定后结果确定）
+
+# ── 存储后端 ─────────────────────────────────────────────────────────────────
+
+# 启用 CPU DRAM 后端
+local_cpu: true
+
+# CPU DRAM 最大用量（GB），per TP rank
+# ⚠️ LMCache 每个 TP worker 进程独立初始化，各自占用此配额
+# 总占用 = max_local_cpu_size × TP_SIZE
+#
+# TP=8：62 × 8 = 496 GB ≈ 500 GB 总目标
+# TP=1：500 GB
+#
+# BF16 KV 每 token 约 189 KB（94层×2×4head×128dim×2B）
+# 每 worker（TP=8）存 1/8 KV heads → per-rank 每 token ≈ 189/8 ≈ 23.6 KB
+# 62 GB per rank ≈ 62×1024² / 23600 ≈ 2.75M tokens（× 8 rank = 22M token 等效空间）
+max_local_cpu_size: 62
+
+# 不启用磁盘后端（NVMe 太慢，不划算）
+local_disk: null
+
+# ── 检索策略 ─────────────────────────────────────────────────────────────────
+
+# 最小检索 token 数：命中 token 数低于此值时跳过 CPU 加载，直接重算
+# 理由：B200 BF16 重算 ~1024 token 约 8ms，PCIe 传输建立固定开销 ~5ms
+#       低于 1024 token 传输性价比不高
+min_retrieve_tokens: 1024
+
+# 不缓存未满 chunk 的 block（等凑满 1024 token 再写入 CPU）
+save_unfull_chunk: false
+
+# ── 性能优化 ─────────────────────────────────────────────────────────────────
+
+# 逐层存储：将 KV Cache 按 layer 分批搬运，与 GPU 计算 pipeline 重叠
+# 理论上可减少 PCIe burst 抖动，但实测 94 层 × 2.4MB = 752 次碎片 DMA
+# 导致有效带宽仅 0.85 GB/s（vs 关闭后 ~30 GB/s），反而更慢
+# 建议关闭：一次整块传输效率更高
+use_layerwise: false
+
+# 异步加载：后台预取 CPU KV，减少等待时间
+enable_async_loading: false  # 当前版本稳定性优先，需要测试后再开
+
+# 缓存淘汰策略：LRU
+cache_policy: LRU
+
+# ── NUMA ─────────────────────────────────────────────────────────────────────
+
+# ⚠️ Docker 容器默认没有 CAP_SYS_NICE / CAP_SYS_ADMIN 权限
+# numa_mode: auto 会调用 mbind() syscall → Operation not permitted
+# → LMCacheEngine 标记为 init_failed → unhealthy → 跳过所有 store/retrieve
+# 必须显式禁用，否则 CPU offload 完全失效
+numa_mode: auto
+
+# ── 其他 ─────────────────────────────────────────────────────────────────────
+
+# 不启用跨实例共享（单机单实例场景）
+enable_p2p: false
+enable_pd: false
+enable_controller: false
