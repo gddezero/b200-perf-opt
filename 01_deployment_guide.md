@@ -103,8 +103,11 @@ sudo docker run --rm --name "qwen35_test" \
   --language-model-only \
   --port 8088 --host 0.0.0.0 \
   --tensor-parallel-size 8 \
-  --data-parallel-size 1
+  --data-parallel-size 1 \
+  --performance-mode throughput
 ```
+
+> `--performance-mode` 按场景选：高吞吐 `throughput`，均衡 `balanced`，低延迟 `interactivity`（详见 [03 §4.3](03_command_reference.md)）。
 
 ### 5b. Qwen3-235B NVFP4（Docker）
 
@@ -123,7 +126,8 @@ sudo docker run --rm --name "qwen3_235b" \
   --port 8088 --host 0.0.0.0 \
   --tensor-parallel-size 4 \
   --data-parallel-size 2 \
-  --enable-expert-parallel
+  --enable-expert-parallel \
+  --performance-mode throughput
 ```
 
 ### 5c. DeepSeek V3.2 FP8（裸机）
@@ -171,7 +175,8 @@ sudo docker run --rm --name "deepseek_v31" \
   --port 8088 --host 0.0.0.0 \
   --tensor-parallel-size 1 \
   --data-parallel-size 8 \
-  --enable-expert-parallel
+  --enable-expert-parallel \
+  --performance-mode throughput
 ```
 
 > 改用 FP8 时把模型路径改为 `/lssd/models/DeepSeek-V3.1-FP8`。

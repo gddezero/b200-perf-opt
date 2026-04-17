@@ -28,7 +28,8 @@ sudo docker run --rm --name "qwen35_test" \
   --port 8088 \
   --host 0.0.0.0 \
   --tensor-parallel-size 8 \        # ← 替换：TP
-  --data-parallel-size 1             # ← 替换：DP
+  --data-parallel-size 1 \           # ← 替换：DP
+  --performance-mode throughput      # ← 替换：throughput / balanced / interactivity
 ```
 
 **可替换参数**：
@@ -38,6 +39,7 @@ sudo docker run --rm --name "qwen35_test" \
 | TP/DP | `--tensor-parallel-size` / `--data-parallel-size` | TP=1 DP=8, TP=2 DP=4, TP=4 DP=2, TP=8 DP=1 |
 | 量化 | 模型路径 + served-model-name | FP8: `Qwen3.5-397B-A17B-FP8`, BF16: `Qwen3.5-397B-A17B` |
 | EP | 加 `--enable-expert-parallel` | DP>1 时加 |
+| performance-mode | `--performance-mode` | throughput（高吞吐）/ balanced（均衡）/ interactivity（低延迟） |
 | MTP | 加 `--speculative-config` | 见下方 MTP 模板 |
 
 ### 1.2 Qwen3.5-397B — 高吞吐（TP=2 DP=4 EP）
@@ -62,7 +64,8 @@ sudo docker run --rm --name "qwen35_throughput" \
   --host 0.0.0.0 \
   --tensor-parallel-size 2 \
   --data-parallel-size 4 \
-  --enable-expert-parallel
+  --enable-expert-parallel \
+  --performance-mode throughput
 ```
 
 ### 1.3 Qwen3.5-397B — MTP 投机解码
@@ -90,6 +93,7 @@ sudo docker run --rm --name "qwen35_mtp" \
   --host 0.0.0.0 \
   --tensor-parallel-size 8 \
   --data-parallel-size 1 \
+  --performance-mode interactivity \
   --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
 ```
 
@@ -117,7 +121,8 @@ sudo docker run --rm --name "deepseek_v31" \
   --port 8088 --host 0.0.0.0 \
   --tensor-parallel-size 1 \
   --data-parallel-size 8 \
-  --enable-expert-parallel
+  --enable-expert-parallel \
+  --performance-mode throughput
 ```
 
 > 改 FP8：模型路径换 `/lssd/models/DeepSeek-V3.1-FP8`。
@@ -140,7 +145,8 @@ sudo docker run --rm --name "qwen3_235b" \
   --host 0.0.0.0 \
   --tensor-parallel-size 4 \
   --data-parallel-size 2 \
-  --enable-expert-parallel
+  --enable-expert-parallel \
+  --performance-mode throughput
 ```
 
 > 量化可选：NVFP4（最高吞吐）/ FP8 / BF16，改模型路径和 served-model-name。
@@ -191,10 +197,11 @@ vllm serve /lssd/models/DeepSeek-V3.2-FP8 \
   --port 8088 \
   --tensor-parallel-size 8 \
   --data-parallel-size 1 \
-  --attention-backend FLASHINFER_MLA_SPARSE
+  --attention-backend FLASHINFER_MLA_SPARSE \
+  --performance-mode interactivity
 ```
 
-> 低延迟配置不加 `--enable-expert-parallel`、不加 `--performance-mode`。
+> 低延迟 TP=8 配置不加 `--enable-expert-parallel`，`--performance-mode` 用 `interactivity`。
 
 ### 2.3 DeepSeek V3.2 — MTP
 
@@ -280,14 +287,19 @@ evalscope perf \
 
 > Qwen 不需要指定 attention-backend。
 
-### 4.3 Performance Mode（仅 DeepSeek）
+### 4.3 Performance Mode（适用所有模型）
 
-| 值 | 场景 |
-|-----|------|
-| `throughput` | 高并发批量处理 |
-| `balanced` | 通用（LMCache 场景用这个） |
-| `interactivity` | MTP 场景推荐 |
-| 不加 | 低延迟 TP=8 配置 |
+| 值 | 场景 | 关键参数（来自 vLLM `arg_utils.py:2156`）|
+|-----|------|---------------------------------------|
+| `throughput` | 高并发批量处理（TP=1/2 + DP 高吞吐） | `max_num_batched_tokens=16384`、`max_num_seqs ×2`、稀疏 CUDA graph |
+| `balanced` | 通用、LMCache 多轮对话场景 | `max_num_batched_tokens=8192`、标准 CUDA graph |
+| `interactivity` | 低延迟 TP=8 单请求、MTP 场景 | `max_num_batched_tokens=8192`、CUDA graph 1–32 全覆盖 |
+
+> **场景对照**（实测最优）：
+> - TP=1/2/4 + DP + EP 高吞吐 → `throughput`
+> - TP=8 单请求低延迟 → `interactivity`
+> - LMCache 多轮长上下文 → `balanced`（`throughput` 会让 TTFT p99 翻倍，详见 [05 §7.1](05_kv_cache_and_lmcache.md)）
+> - MTP 投机解码 → `interactivity`（CUDA graph 1–32 全覆盖避免 fallback eager）
 
 ### 4.4 模型路径与名称
 
