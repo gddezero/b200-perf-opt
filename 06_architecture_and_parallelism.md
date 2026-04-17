@@ -220,6 +220,18 @@ FA4 不支持 FP8 KV cache，实际推荐 FlashInfer。
 | Qwen3.5 (397B) | ~101GB (TP=8) | ~49.6GB (TP=8) | ~25GB (TP=8) |
 | Qwen3 (235B) | ~59GB (TP=4) | ~30GB (TP=4) | ~15GB (TP=4) |
 
-### 5.2 权重越小 → KV 越大
+### 5.2 权重越小 → KV Cache 越大（越大越好）
 
-NVFP4 权重比 BF16 小一半 → 释放更多 HBM 给 KV Cache → 多轮对话场景能容纳更多对话历史，提高 prefix cache 命中率。
+NVFP4 权重比 BF16 小一半 → 释放更多 HBM 给 KV Cache → KV Cache 池越大越好，原因：
+
+1. **更多并发 request**：每个 request 的 KV 占固定字节，池越大，可同时活跃的 request 越多 → 吞吐越高
+2. **更长上下文**：单个长 prompt 的 KV 能完整放下，避免 swap/recompute
+3. **更高 prefix cache 命中率**：多轮对话场景中保留更多历史 KV，命中率提升 → TTFT 降低
+4. **减少调度排队**：高并发下 GPU KV 不易饱和，避免新 request 等待 KV slot 释放（详见 [05 §5 高并发饱和分析](05_kv_cache_and_lmcache.md)）
+
+**实测对照**（V3.2，B200×8 TP=1 DP=8）：
+
+| 量化 | 权重总占用 | 单卡剩余给 KV | KV tokens/engine |
+|------|-----------|------------|------------------|
+| FP8 | ~664 GB | ~97 GB | ~2.36M |
+| NVFP4 | ~335 GB | ~138 GB | ~3.36M（+42%） |
