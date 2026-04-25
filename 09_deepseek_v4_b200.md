@@ -1,7 +1,7 @@
 # DeepSeek V4 (Pro & Flash) 在 B200 × 8 上的部署与压测
 
 > **测试时间**：2026-04-24 ~ 2026-04-25
-> **硬件**：GCP A4 B200 SXM × 8 (192 GB HBM3e/卡)
+> **硬件**：GCP A4 B200 SXM × 8 (180 GB HBM3e/卡)
 > **软件**：SGLang `lmsysorg/sglang:deepseek-v4-blackwell` + vLLM `vllm/vllm-openai:deepseekv4-cu130`
 > **压测工具**：[evalscope perf](https://github.com/modelscope/evalscope) (`benchmark.sh` 包装)
 > **标准负载**：4500 token 输入，150–200 token 输出（ignore_eos=true），无 prefix cache，random dataset
@@ -36,7 +36,7 @@
 
 | 项 | 规格 |
 |---|---|
-| GPU | 8 × NVIDIA B200 SXM (192 GB HBM3e/卡) |
+| GPU | 8 × NVIDIA B200 SXM (180 GB HBM3e/卡) |
 | 卡间 | NVLink 5.0 全互联 |
 | OS | Ubuntu 24.04 |
 | Driver | NVIDIA 580 |
