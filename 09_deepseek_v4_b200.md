@@ -67,7 +67,7 @@
 ### 2.1 通用前置
 
 ```bash
-ssh maxwellx_google_com@forrest-b200-1
+ssh <user>@<b200-host>
 
 # 拉镜像（首次）
 sudo docker pull lmsysorg/sglang:deepseek-v4-blackwell
