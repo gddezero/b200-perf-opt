@@ -122,6 +122,9 @@ Step 5: 查看 benchmark_result/ 下的结果
 | [06 - 架构与并行策略](06_architecture_and_parallelism.md) | MoE 并行、TP/DP/EP 权衡、注意力后端对比 |
 | [07 - 客户报告](07_customer_report.md) | 面向客户的性能对比数据 |
 | [08 - 压测数据指南](08_benchmark_data_guide.md) | 197 次测试有效性、results.csv 使用方法 |
+| [09 - DeepSeek V4 B200 部署](09_deepseek_v4_b200.md) | V4-Pro / V4-Flash SGLang/vLLM 三套配方、压测数据、@1 TTFT 异常分析 |
+| [10 - V4-Pro 多轮长上下文压测](10_deepseek_v4_b200_multi_turn.md) | V4-Pro 低延迟 TP=8 多轮 26 档实测（60K/100K/200K base）、KV pool ≥90% 物理崩盘点、parallel 上限规则 |
+| [SGLang KV cache 调研](sglang_kvcache_research.md) | DP 模式 KV pool 物理分布、SMG 单机不可用源码证据、客户端 `data_parallel_rank` 路由实测 cache hit 23%→77% |
 | [scripts/](scripts/) | 文档涉及的全部脚本：mount_lssd.sh / download_models.sh / install.sh / benchmark.sh / bench_multi_turn.sh / lmcache_cpu.yaml |
 
 ---
@@ -155,3 +158,6 @@ Step 5: 查看 benchmark_result/ 下的结果
 | 06_architecture_and_parallelism.md | MoE并行策略与模型参数分析.md, configs/hw/*.conf, configs/models/*.conf |
 | 07_customer_report.md | benchmark_result/benchmark_analysis_customer.md, b200_vs_h200_report_v2.md, b200_aws_gcp.md |
 | 08_benchmark_data_guide.md | benchmark_result/results.csv, INDEX.md |
+| 09_deepseek_v4_b200.md | 2026-04 V4-Pro / V4-Flash 压测 #199–#210 (SGLang) + #202+ (vLLM) |
+| 10_deepseek_v4_b200_multi_turn.md | 2026-04-28/29 V4-Pro 多轮 #211–#236 (60K/100K/200K base × parallel sweep), batch_multi_turn.sh + results_multiturn.csv |
+| sglang_kvcache_research.md | 2026-04-27 SGLang 源码调研 (data_parallel_controller / radix_cache / hicache) + V4-Pro 实测 |
