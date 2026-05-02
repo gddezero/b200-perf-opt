@@ -60,6 +60,111 @@
 
 ⚠️ `bytes_per_full_token=38KB` 不等于真实 KV/token，含固定开销。跨引擎对比无意义，只用于本配方内的容量预算。
 
+### 1.3 V4-Pro 每 token KV 占用（两个口径必须区分）
+
+V4-Pro KV 数据有**两个不同口径**，混用必出错（本项目曾两次幻觉，详见 [project_v4pro_kv_capacity.md](../.claude/projects/-home-admin-maxwellx-altostrat-com-code-b200-vllm-opt/memory/project_v4pro_kv_capacity.md)）。
+
+#### 口径 A：理论稀疏摊销（论文 / HF blog 用）
+
+每 token 真正新增到 KV 池的字节，长上下文渐近值。
+
+V4-Pro 公式（架构：30 层 CSA stride=4 + 31 层 HCA stride=128 + SWA window 摊到 0）：
+
+```
+30 × 640B / 4 (CSA) + 31 × 640B / 128 (HCA)
+≈ 4,800 + 155 = ~4,950 B (BF16) → ~9.6 KB（含其他细项）
+÷ 2 (FP8) = ~4.85 KB/token
+```
+
+| dtype | KV/token | 适用 |
+|---|---:|---|
+| BF16 | ~9.6 KB | V4 论文/blog 公开数据 |
+| **FP8** (本压测 `--kv-cache-dtype fp8_e4m3`) | **~4.85 KB** | V4-Pro 实际部署 |
+
+对比 V3.2-Exp dense MLA（BF16 = 68.6 KB/token）：**V4 ≈ V3.2 的 7%**（HF blog "1/10 of V3.2" 说法成立，前提：1M 长上下文渐近 + 同 dtype 比 + 摊销稀疏池）。
+
+#### 口径 B：引擎物理预算（启动日志 `bytes_per_full_token`）
+
+引擎为每个 logical token 在池里**预留的总空间**，含真 KV + lightning indexer key + compressor inflight slot 等固定开销。
+
+```
+SGLang V4-Pro TP=8 dp=1 启动日志:
+  bytes_per_full_token = 38,367 B ≈ 37.5 KB/token
+  available_bytes      = 38.22 GB / TP shard
+  full_token           = 1,069,568 tokens（KV pool 容量）
+```
+
+**38 KB / 卡 / token 拆解**（5 池配额）：
+
+| 池 | 含义 | 摊销值 / 卡 |
+|---|---|---:|
+| `full` | lightning indexer query-side key（每 token 1 entry，全 head 不切）| ~640 B |
+| `swa` | SWA window (token × 0.0997)，head 切 8 | ~640 B |
+| `c4` | CSA latent (token / 4)，head 切 8 | ~600 B |
+| `c128` | HCA latent (token / 128)，head 切 8 | ~20 B |
+| `c4_state` + `c128_state` | compressor **inflight buffer**（O(running_reqs)，固定 GB 预留）| ~36 KB 摊销 |
+
+→ 38 KB / 卡 / token 中，~1.3 KB 是真 KV 切片，~36 KB 是固定开销 + inflight 摊销 + indexer 副本。
+
+#### ⚠️ 不要混用
+
+| 场景 | 用哪个 |
+|---|---|
+| 算"V4 比 V3.2 KV 省多少" | **口径 A**（~7-10%）|
+| 算"能装多少 token / 多少并发"、判断是否爆池 | **口径 B**（full_token = 1,069,568 / TP shard）|
+| vLLM 76 KB ÷ SGLang 38 KB | ❌ 没意义（不同引擎不同口径）|
+| 把 38 KB 当"V4 真实 KV/token" | ❌ 漏掉 inflight 不该算到单 token |
+
+#### 验证算式（60K p=16 崩盘）
+
+按 per shard 口径 B 算 KV pool 占用：
+
+```
+16 conv × 60K logical token = 960K logical tokens
+单张卡占用 = 960K × 38,367 B = 36.83 GB
+单张卡 pool = 38.22 GB
+占用率 = 36.83 / 38.22 = 96.4%  ← 实测 num_used_tokens 95.7% 吻合
+```
+
+→ KV pool 占用 ≥ 90% 触发 RadixTree evict 跟不上 → 全塌方。这就是 §5.1 物理崩盘点公式的来源。
+
+### 1.4 TP=8 dp=1 的 8 卡 KV 分布（最容易出错的地方）
+
+**关键事实**：8 张卡每张都有完整的 38.22 GB KV pool（共 305.76 GB 物理显存），但**全集群只能装 1.07M 个 logical token，不是 ×8**。1 个 logical token 必须跨 8 卡同时持有不同 head 的 KV 切片。
+
+#### 物理分布
+
+| 项 | 每张卡 | 8 卡合计 |
+|---|---|---|
+| `available_bytes`（KV pool 实占）| **38.22 GB** | 305.76 GB（物理显存）|
+| `full_token`（可装 logical tokens）| **1,069,568** | **1,069,568**（不是 ×8！）|
+| `bytes_per_full_token` | 38,367 B / 卡 / logical token | — |
+
+→ 1 个 logical token 在 8 卡上同时存在（每卡存自己负责的 head 的 KV 切片），所以"装得下多少 token"按 1 张卡的 full_token 算就是全集群容量。
+
+#### 1 个 logical token 在 8 卡里实际存了什么
+
+按 SGLang 启动日志的 5 池拆解（每张卡都有这 5 池）：
+
+- **真 KV 数据（SWA + CSA + HCA latent）**：head 维度切 8，每张卡只持有自己的 1/8。8 卡相加 ≈ 5 KB / token（口径 A 真实 KV）
+- **lightning indexer key**：query-side 全 head 复用，**8 卡每卡都存一份完整副本**
+- **compressor inflight buffer (`c4_state`, `c128_state`)**：跟在飞请求数走，不跟 token 数走，每张卡都预留几 GB 的 inflight 槽位
+
+#### TP=8 dp=1 vs DPA dp=8 对比
+
+| 项 | TP=8 dp=1（本压测）| DPA dp=8 ep=8 |
+|---|---|---|
+| 每张卡 KV pool | 38.22 GB | 16.35 GB |
+| 每张卡 full_token | 1,069,568 | 457,472 |
+| **全集群 logical tokens** | **1,069,568**（单池）| **3,659,776**（8 × 457k 独立池）|
+| 1 个 logical token 跨卡分布 | 8 卡同时持有 head 切片 | 1 个 engine 独占 |
+| RadixTree 池数 | **1**（全卡共享同一棵 tree）| **8**（slice 间互不复用）|
+| 多轮 prefix 复用 | ✅ 100%（同一 tree）| ❌ 跨 slice 复用率 ~50% |
+
+→ TP=8 dp=1 物理空间利用率低（每卡 38GB vs DPA 16GB），但**单 RadixTree 全卡共享**，多轮场景 cache hit 真实 74-78%；DPA 物理空间利用率高（总容量 3.66M），但 8 个独立 RadixTree 严重碎化。
+
+→ 这就是 §2.2 表里"低延迟 TP=8 是多轮场景首选"的物理依据。
+
 ---
 
 ## 2. 部署：低延迟 TP=8（多轮压测唯一配方）
@@ -129,7 +234,82 @@ python3 ~/code/b200_vllm_opt/gen_multi_turn_dataset.py \
 | `multi_turn_100k_pg_sg.jsonl` | 100,000 | 100K base 压测 |
 | `multi_turn_real_pg_sg.jsonl` | 200,000 | 200K base 压测 |
 
-### 3.2 batch_multi_turn.sh v3（含 evict 监控）
+### 3.2 ⚠️ evalscope multi-turn 累计机制（为什么必须用 custom_multi_turn）
+
+evalscope `random_multi_turn` 的累计行为是**最大的反直觉点**，必须先理解才能设计有效的多轮压测。
+
+**源码事实**（`evalscope/perf/multi_turn_benchmark.py:130-215`）：
+
+```python
+context: List[Dict] = []
+for user_turn_idx, user_msg in enumerate(user_msgs):
+    context.append(user_msg.copy())                     # 加新 user
+    request = api_plugin.build_request(list(context))   # 全量 context 当请求
+    benchmark_data = await client.post(request)
+    context.append({'role': 'assistant',
+                    'content': benchmark_data.generated_text})  # 加 assistant 真实回复
+```
+
+**`random_multi_turn` 数据集**（`plugin/datasets/multi_turn.py:106-129`）每轮新 user msg 长度独立从 `[min_prompt_length, max_prompt_length]` 均匀采样。
+
+**累计公式**：`turn_N_input_tokens ≈ N × U`（U 是 `[min, max]` 内的采样值，max_tokens 输出 ≪ U 可忽略）
+
+**举例 `--min 100000 --max 200000 --max-turns 5`**：
+
+| turn | 单条 user msg | 累计请求 input |
+|---:|---:|---:|
+| 1 | 100-200K | 100-200K |
+| 2 | 100-200K | 200-400K |
+| 3 | 100-200K | 300-600K |
+| 4 | 100-200K | 400-800K |
+| 5 | 100-200K | **500K-1M（最坏 1M）** |
+
+⚠️ 参数说 "max 200K" 实际请求最大 input 是 **5×200K=1M**。命名严重反直觉。
+
+**evalscope 没有任何控制累计的参数**：
+
+| 参数 | 真实语义 |
+|---|---|
+| `--min-prompt-length` / `--max-prompt-length` | **单条 user message** 长度（不是累计、不是请求总量）|
+| `--min-turns` / `--max-turns` | conv 的 user turn 数量 |
+| `--max-tokens` | 单 turn assistant 输出上限 |
+
+**无 `--max-history-tokens` / `--max-context` / `--rolling-window` / `--keep-only-last-k-turns`**。runner 硬编码 append 全量上下文。
+
+**实测验证**（5K-10K 单 user msg × 5 turn × 5 conv，2026-04-28）：
+
+| conv | turn-1 | turn-2 | turn-3 | turn-4 | turn-5 | 比例 |
+|:---:|---:|---:|---:|---:|---:|:---:|
+| 0 | 8,286 | 16,338 | 22,118 | 28,804 | 34,759 | ×4.2 |
+| 1 | 6,214 | 13,028 | 21,988 | 28,865 | 38,125 | ×6.1 |
+| 2 | 5,423 | 11,894 | 17,304 | 25,163 | 34,301 | ×6.3 |
+
+严格单调递增，turn-5 ≈ 5 × turn-1，完全匹配公式。
+
+**custom_multi_turn vs random_multi_turn 对比**：
+
+| 项 | random_multi_turn | custom_multi_turn（本压测用）|
+|---|---|---|
+| 数据来源 | 运行时随机生成 | 预先生成的 JSONL（`messages` 数组）|
+| turn-1 长度 | `[min, max]` 均匀采样 → 方差大 | **预先固定**（60K/100K/200K 整齐对齐）|
+| 后续 turn 长度 | 每轮独立 `[min, max]` 采样 | **预先固定**（每轮 +5K incr）|
+| 累计上限 | 5 turn × max = N×max（不可控）| 5 turn 累计 ≈ turn-1 + 4×5K（**完全可控**）|
+| cache hit 实验性 | 跨 conv 复用率低 | 跨 conv 同源 prefix → 复用率真实 74-78% |
+| 复现性 | 每次随机不同 | seed 固定 100% 复现 |
+
+**本压测累计长度**（custom_multi_turn 真材料）：
+
+| base | turn-1 | turn-5 累计 | 用 random 等效 max |
+|:---:|---:|---:|---:|
+| 60K | 60K | ~80K | 16K (5×16=80) |
+| 100K | 100K | ~120K | 24K |
+| 200K | 200K | ~220K | 44K |
+
+⚠️ **不要用 `random_multi_turn --max-prompt-length 200000`** 测 200K 多轮——5 turn 累计到 1M 会直接打爆 KV 池（1.07M 总容量），与本压测的"200K base"语义完全不同。
+
+**生产环境真实多轮**：业务侧必须做滚动 truncation（保留最近 K 条 message），SGLang/router 都救不了 evalscope 这个 append-only 行为。详见 [reference_evalscope_multiturn_accumulation.md](../.claude/projects/-home-admin-maxwellx-altostrat-com-code-b200-vllm-opt/memory/reference_evalscope_multiturn_accumulation.md)。
+
+### 3.3 batch_multi_turn.sh v3（含 evict 监控）
 
 每档自动：
 1. POST `/flush_cache` 清 RadixTree（保证档间公平）
@@ -147,7 +327,7 @@ NUM_PER_P=50 \
 ./batch_multi_turn.sh
 ```
 
-### 3.3 results_multiturn.csv（single source of truth）
+### 3.4 results_multiturn.csv（single source of truth）
 
 ```bash
 # B200 跑完后本机拉数据
@@ -159,7 +339,7 @@ python3 build_results_multiturn_csv.py
 
 数据来源融合：v3 batch log（新档自动有 EVICT）+ `evict_backfill.json`（历史档 PromQL `increase(sglang:evicted_tokens_total[Δt] @end_ts)` 反查）。
 
-### 3.4 percentile 数据点统计有效性
+### 3.5 percentile 数据点统计有效性
 
 evalscope multi-turn 模式 percentile **按 turn 算不按 conv 算**，每档 turn 数 = `parallel × 50 × avg_turns(≈4.5)`：
 
@@ -172,7 +352,7 @@ evalscope multi-turn 模式 percentile **按 turn 算不按 conv 算**，每档 
 
 **报告全部用 P95**（≥ 5 数据点统计有效线一律满足，P99 部分小档只有 2-9 个数据点，不可靠）。
 
-### 3.5 cache hit 两个口径
+### 3.6 cache hit 两个口径
 
 | 口径 | 来源 | 60K typical | 100K typical | 200K typical |
 |---|---|---:|---:|---:|
