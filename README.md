@@ -124,6 +124,8 @@ Step 5: 查看 benchmark_result/ 下的结果
 | [08 - 压测数据指南](08_benchmark_data_guide.md) | 197 次测试有效性、results.csv 使用方法 |
 | [09 - DeepSeek V4 B200 部署](09_deepseek_v4_b200.md) | V4-Pro / V4-Flash SGLang/vLLM 三套配方、压测数据、@1 TTFT 异常分析 |
 | [10 - V4-Pro 多轮长上下文压测](10_deepseek_v4_b200_multi_turn.md) | V4-Pro 低延迟 TP=8 多轮 26 档实测（60K/100K/200K base）、KV pool ≥90% 物理崩盘点、parallel 上限规则 |
+| [11 - V4-Pro 多轮 SGLang HiCache](11_deepseek_v4_b200_multi_turn_sglang_hicache.md) | SGLang HiCache ratio=12 + MegaMoE + EAGLE 多轮 22 档（60K/100K/200K/400K）、D↔H 接力把"hit 塌方"救成"latency 恶化"、cost basis 反推 |
+| [12 - V4-Pro PD 分离 + KV Offload 全家桶](12_deepseek_v4_b200_pd_kvcache_offload.md) | vLLM PD 分离 + Mooncake Store/Transfer 全家桶 16 档（60K/100K/200K/400K × p8-64）、working set 12.8M 容量墙（HBM 活跃集非 Store 容量）、offload 价值 = workload 依赖、MTP 与 prefix cache 互斥、0.22 升级 |
 | [SGLang KV cache 调研](sglang_kvcache_research.md) | DP 模式 KV pool 物理分布、SMG 单机不可用源码证据、客户端 `data_parallel_rank` 路由实测 cache hit 23%→77% |
 | [scripts/](scripts/) | 文档涉及的全部脚本：mount_lssd.sh / download_models.sh / install.sh / benchmark.sh / bench_multi_turn.sh / lmcache_cpu.yaml |
 
@@ -160,4 +162,5 @@ Step 5: 查看 benchmark_result/ 下的结果
 | 08_benchmark_data_guide.md | benchmark_result/results.csv, INDEX.md |
 | 09_deepseek_v4_b200.md | 2026-04 V4-Pro / V4-Flash 压测 #199–#210 (SGLang) + #202+ (vLLM) |
 | 10_deepseek_v4_b200_multi_turn.md | 2026-04-28/29 V4-Pro 多轮 #211–#236 (60K/100K/200K base × parallel sweep), batch_multi_turn.sh + results_multiturn.csv |
-| sglang_kvcache_research.md | 2026-04-27 SGLang 源码调研 (data_parallel_controller / radix_cache / hicache) + V4-Pro 实测 |
+| 11_deepseek_v4_b200_multi_turn_sglang_hicache.md | 2026-05-16/17 V4-Pro SGLang HiCache ratio=12 多轮 #243–#270 (60K/100K/200K/400K), batch_multi_turn.sh v3.1 + prom_snapshot.py + price_analyzer.py |
+| 12_deepseek_v4_b200_pd_kvcache_offload.md | 2026-05-30/31 V4-Pro vLLM PD 全家桶 #267–#287 (Mooncake Transfer+Store, 60K/100K/200K/400K × p8-64) + 0.22 升级, batch_multi_turn_pd.sh + prom 快照, sweep 报告经 2 轮 fact-check |
