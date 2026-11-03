@@ -202,13 +202,13 @@
 | Decode (kv_consumer) | `forrest-b200-02` | 8× B200 183 GB | 同 |
 | Router | `forrest-b200-01:8080` | — | consistent_hash cache-aware |
 
-主机网络优化（实测在生效，见 memory `reference_gdr_nvidia_peermem_pd` / `reference_gcp_sysctl_irq_mlnx_tune`）：GDR `nvidia_peermem` / sysctl BBR+fq+128MB rmem-wmem / IRQ per-NUMA pin / mlnx_tune / 8 RDMA active ports。
+主机网络优化（实测在生效，见 memory `reference_nvidia_peermem_required.md` 的「并入：reference-gdr-nvidia-peermem-pd-2026-05-28」「并入：reference-gcp-sysctl-irq-mlnx-tune-2026-05-28」两节，原 `reference_gdr_nvidia_peermem_pd` / `reference_gcp_sysctl_irq_mlnx_tune` 已并入）：GDR `nvidia_peermem` / sysctl BBR+fq+128MB rmem-wmem / IRQ per-NUMA pin / mlnx_tune / 8 RDMA active ports。
 
 ### 3.2 模型 + KV pool
 
 DeepSeek-V4-Pro FP8（1.6T total / 49B active，sparse MLA + lightning indexer + MoE）。两端各 `--data-parallel-size 8 --enable-expert-parallel`（DP=8 EP），`--kv-cache-dtype fp8`，`--block-size 256`，`--max-model-len 1048576`，`--gpu-memory-utilization 0.85`。
 
-⚠️ **block_size 必须 256**：V4 nvidia `model.py` 硬编码 256 假设，512 撞 model storage layout bug（详见 memory `reference_mooncake_tuning_sweep`）。
+⚠️ **block_size 必须 256**：V4 nvidia `model.py` 硬编码 256 假设，512 撞 model storage layout bug（详见 memory `reference_mooncake_4env_sweep_2026_05_28.md` 的「并入：reference-mooncake-tuning-sweep-2026-05-25」一节，原 `reference_mooncake_tuning_sweep` 已并入）。
 
 ## 4. PD 部署：MultiConnector 全家桶（本次配方）
 
@@ -248,7 +248,7 @@ MultiConnector
 | `--moe-backend` | `deep_gemm_mega_moe` | |
 | `--attention_config.use_fp4_indexer_cache` | `True` | V4 sparse indexer |
 | `--served-model-name` | `DeepSeek-V4-Pro` | ⛔ 必须显式（否则 404 + evalscope 崩，见 §16.2）|
-| `-e MC_IB_PCI_RELAXED_ORDERING` | `1` | Mooncake 唯一净 win env（双端，见 memory `reference_mooncake_4env_sweep`）|
+| `-e MC_IB_PCI_RELAXED_ORDERING` | `1` | Mooncake 唯一净 win env（双端，见 memory `reference_mooncake_4env_sweep_2026_05_28.md`）|
 | `--speculative-config` (MTP) | **不加** | MTP 与 prefix cache 互斥（见 §13）|
 | decode 额外 | `--max-cudagraph-capture-size 512` | 防 cudagraph capture OOM |
 
@@ -264,7 +264,7 @@ MultiConnector
 
 主 16 档 sweep（#267-283）跑在 **5/27 custom image** `vllm-v4-mooncake:5_27-pytest-pd`（vLLM 0.21.1rc1.dev323，= 0.22−19commits）。
 
-⚠️ **现生产已升级 0.22 正式 release**：`vllm-v022-pytest`（FROM `vllm/vllm-openai:v0.22.0` + pip pytest；官方 image 已含 mooncake 0.3.10.post2）。0.22 增量小但含 #43719（connector spec-decode 修复）。容量墙/接力等机制结论与版本无关，0.22 仍适用。MTP 互斥（§13）+ MULTI_STREAM A/B（§14）在 0.22 上验证（详见 memory `reference_vllm_022_upgrade_mtp_cache_exclusive`）；**prefill-bound 对照（§10 / #284-287）与主 16 档同属 0.21 5/27 image**（与主 sweep 同期跑的 workload 对照，非 0.22）。
+⚠️ **现生产已升级 0.22 正式 release**：`vllm-v022-pytest`（FROM `vllm/vllm-openai:v0.22.0` + pip pytest；官方 image 已含 mooncake 0.3.10.post2）。0.22 增量小但含 #43719（connector spec-decode 修复）。容量墙/接力等机制结论与版本无关，0.22 仍适用。MTP 互斥（§13）+ MULTI_STREAM A/B（§14）在 0.22 上验证（详见 memory `reference_vllm_022_upgrade_mtp_cache_exclusive_2026_05_31.md`）；**prefill-bound 对照（§10 / #284-287）与主 16 档同属 0.21 5/27 image**（与主 sweep 同期跑的 workload 对照，非 0.22）。
 
 ### 4.5 启动顺序 + 健康检查 + smoke
 
@@ -523,13 +523,13 @@ A/B 实测（#294-299，100K 8turn IGNORE_EOS=500，0 vs 1024）：
 ## 附录 A：参考资料
 
 - 主数据源（#267-283 sweep，fact-check 2 轮 PASS）：`benchmark_result/267-283_20260531_DeepSeek-V4-Pro_pd_mooncake_sweep.md`
-- 容量墙结论：memory `reference_vllm_pd_mooncake_capacity_wall_2026_05_31.md`
+- 容量墙结论：memory `reference_pd_mooncake_b_plan_tuning_2026_05_28.md` 的「并入：reference-vllm-pd-mooncake-capacity-wall-2026-05-31」一节（原 `reference_vllm_pd_mooncake_capacity_wall_2026_05_31` 已并入）
 - 0.22 升级 + MTP 互斥 + MULTI_STREAM A/B：memory `reference_vllm_022_upgrade_mtp_cache_exclusive_2026_05_31.md`
 - PR #41526 元信息（「Tune default value」/ merged 2026-05-03）+ 5/27 与 0.22 image `envs.py` 默认值均 = 1024：本会话 `gh api repos/vllm-project/vllm/pulls/41526` + `docker run … grep envs.py` 实测（2026-05-31）
 - 压测环境坑：memory `feedback_vllm_pd_mooncake_bench_setup_traps_2026_05_30.md`
 - 真 PD B 方案 5 轮调优：memory `reference_pd_mooncake_b_plan_tuning_2026_05_28.md`
 - session affinity（consistent_hash + X-Session-ID）：memory `reference_session_affinity_consistent_hash_win_2026_05_29.md`
-- GDR / sysctl / IRQ 网络优化：memory `reference_gdr_nvidia_peermem_pd_2026_05_28.md` + `reference_gcp_sysctl_irq_mlnx_tune_2026_05_28.md`
+- GDR / sysctl / IRQ 网络优化：memory `reference_nvidia_peermem_required.md` 的「并入：reference-gdr-nvidia-peermem-pd-2026-05-28」「并入：reference-gcp-sysctl-irq-mlnx-tune-2026-05-28」两节（原 `reference_gdr_nvidia_peermem_pd_2026_05_28.md`、`reference_gcp_sysctl_irq_mlnx_tune_2026_05_28.md` 已并入）
 - Mooncake env sweep（RO 双端唯一 win）：memory `reference_mooncake_4env_sweep_2026_05_28.md`
 - SGLang HiCache 对照组：[11_deepseek_v4_b200_multi_turn_sglang_hicache.md](11_deepseek_v4_b200_multi_turn_sglang_hicache.md)
 - 31 份 prom 快照：`benchmark_result/metrics/prom_{267-283}_mooncake_*.json` + `_summary.txt`

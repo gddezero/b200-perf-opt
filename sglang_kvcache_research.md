@@ -122,7 +122,7 @@ sudo docker run -d --name sglang-router --restart no --network host \
 
 ### 工具速查
 
-- 真实数据 multi-turn 数据集生成：`reference_evalscope_custom_multiturn_real_data.md`
+- 真实数据 multi-turn 数据集生成：`reference_evalscope_prefix_length_additive.md` 的「并入：reference-evalscope-custom-multiturn-real-data」一节（原 `reference_evalscope_custom_multiturn_real_data.md` 已并入）
 - 客户端 dp_rank 注入 wrapper：`/home/maxwellx_google_com/code/b200_vllm_opt/run_evalscope_dp.py`
 - 不同 parallel 档的 router 参数：`reference_router_concurrency_param_combos.md`
 
