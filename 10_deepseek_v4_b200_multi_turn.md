@@ -613,7 +613,7 @@ evict_per_prompt 实测分布:
 
 **根因**：share_gpt_en 中位 input 仅 625 tok / P99 仅 2194 tok，远低于 60K target。turn-1 全是相同短 prompt，cache hit 85% 是 prefix 复用假象，**不是真实长上下文行为**。
 
-**对策**：用 PG (Project Gutenberg) + ShareGPT 拼接到 turn-1 整齐对齐 60K/100K/200K（custom_multi_turn 数据集已生成）。详见 [reference_evalscope_custom_multiturn_real_data.md](../.claude/projects/-home-admin-maxwellx-altostrat-com-code-b200-vllm-opt/memory/reference_evalscope_custom_multiturn_real_data.md)。
+**对策**：用 PG (Project Gutenberg) + ShareGPT 拼接到 turn-1 整齐对齐 60K/100K/200K（custom_multi_turn 数据集已生成）。详见 memory `reference_evalscope_prefix_length_additive.md#并入-reference-evalscope-custom-multiturn-real-data`（原 `reference_evalscope_custom_multiturn_real_data.md`，已并入）。
 
 ### 17.6 档间不 flush_cache → 后档拿前档 cache hit
 
@@ -676,7 +676,7 @@ evict_per_prompt 实测分布:
 - 26 档物理崩盘点定位 memory：`reference_evict_parallel_model.md`
 - KV 池容量两口径辨析 memory：`project_v4pro_kv_capacity.md`
 - evalscope cache hit 偏差 memory：`feedback_sglang_cache_hit_metric_bug.md`
-- custom_multi_turn 数据集生成 memory：`reference_evalscope_custom_multiturn_real_data.md`
+- custom_multi_turn 数据集生成 memory：`reference_evalscope_prefix_length_additive.md#并入-reference-evalscope-custom-multiturn-real-data`（原 `reference_evalscope_custom_multiturn_real_data.md`，已并入）
 - evalscope 累计机制 memory：`reference_evalscope_multiturn_accumulation.md`
 - 标准化 CSV：[../benchmark_result/results_multiturn.csv](../benchmark_result/results_multiturn.csv)
 - batch 脚本：[../batch_multi_turn.sh](../batch_multi_turn.sh)
